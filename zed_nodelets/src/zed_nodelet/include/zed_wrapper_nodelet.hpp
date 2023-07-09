@@ -355,6 +355,10 @@ protected:
    */
     bool getCamera2BaseTransform();
 
+    /*! \brief Utility to initialize the static transform from Depth Optical Frame to Depth Frame
+   */
+    bool getDepthOpt2DepthTransform();
+
     /*! \brief Start tracking
    */
     void start_pos_tracking();
@@ -437,6 +441,7 @@ private:
     ros::Publisher mPubConfMap; //
     ros::Publisher mPubDisparity; //
     ros::Publisher mPubCloud;
+    ros::Publisher mPubCloudOpt;
     ros::Publisher mPubFusedCloud;
     ros::Publisher mPubPose;
     ros::Publisher mPubPoseCov;
@@ -596,11 +601,14 @@ private:
     tf2::Transform mSensor2BaseTransf; // Coordinates of the base frame in sensor frame
     tf2::Transform mSensor2CameraTransf; // Coordinates of the camera frame in sensor frame
     tf2::Transform mCamera2BaseTransf; // Coordinates of the base frame in camera frame
+    tf2::Transform mDepthOpt2DepthTransf; // Coordinates of the depth optical frame to camera left frame in which cloud is available
+    geometry_msgs::TransformStamped mDepthOpt2DepthTransfStampedMsg; 
 
     bool mSensor2BaseTransfValid = false;
     bool mSensor2CameraTransfValid = false;
     bool mCamera2BaseTransfValid = false;
     bool mStaticImuFramePublished = false;
+    bool mDepthOpt2DepthTransfValid = false;
 
     // initialization Transform listener
     boost::shared_ptr<tf2_ros::Buffer> mTfBuffer;

@@ -34,6 +34,9 @@
 #include "zed_interfaces/ObjectsStamped.h"
 #include <zed_interfaces/PlaneStamped.h>
 
+#include <tf2/convert.h>
+#include<tf2_sensor_msgs/tf2_sensor_msgs.h>
+
 //#define DEBUG_SENS_TS 1
 
 namespace zed_nodelets {
@@ -139,6 +142,7 @@ void ZEDWrapperNodelet::onInit()
     depth_topic_root += "/depth_registered";
 
     std::string pointcloud_topic = "point_cloud/cloud_registered";
+    std::string pointcloud_optical_topic = "optical_cloud/cloud_registered";
 
     std::string pointcloud_fused_topic = "mapping/fused_cloud";
 
@@ -457,6 +461,9 @@ void ZEDWrapperNodelet::onInit()
     // PointCloud publishers
     mPubCloud = mNhNs.advertise<sensor_msgs::PointCloud2>(pointcloud_topic, 1);
     NODELET_INFO_STREAM("Advertised on topic " << mPubCloud.getTopic());
+
+    mPubCloudOpt = mNhNs.advertise<sensor_msgs::PointCloud2>(pointcloud_optical_topic, 1);
+    NODELET_INFO_STREAM("Advertised on topic " << mPubCloudOpt.getTopic());
 
     if (mMappingEnabled) {
         mPubFusedCloud = mNhNs.advertise<sensor_msgs::PointCloud2>(pointcloud_fused_topic, 1);
@@ -1203,6 +1210,52 @@ bool ZEDWrapperNodelet::getSens2BaseTransform()
     return true;
 }
 
+bool ZEDWrapperNodelet::getDepthOpt2DepthTransform()
+{
+    NODELET_DEBUG("Getting static TF from '%s' to '%s'", mDepthOptFrameId.c_str(), mDepthFrameId.c_str());
+
+    mDepthOpt2DepthTransfValid = false;
+    static bool first_error = true;
+
+    // ----> Static transforms
+    // Sensor to Base link
+    try {
+        // Save the transformation
+        geometry_msgs::TransformStamped mDepthOpt2DepthTransfStampedMsg = mTfBuffer->lookupTransform(mDepthOptFrameId, mDepthFrameId, ros::Time(0), ros::Duration(0.1));
+
+        // Get the TF2 transformation
+        tf2::fromMsg(mDepthOpt2DepthTransfStampedMsg.transform, mDepthOpt2DepthTransf);
+
+        double roll, pitch, yaw;
+        tf2::Matrix3x3(mDepthOpt2DepthTransf.getRotation()).getRPY(roll, pitch, yaw);
+
+        NODELET_INFO("Static transform Camera Center to Base [%s -> %s]", mDepthOptFrameId.c_str(), mDepthFrameId.c_str());
+        NODELET_INFO(" * Translation: {%.3f,%.3f,%.3f}", mCamera2BaseTransf.getOrigin().x(),
+            mDepthOpt2DepthTransf.getOrigin().y(), mDepthOpt2DepthTransf.getOrigin().z());
+        NODELET_INFO(" * Rotation: {%.3f,%.3f,%.3f}", roll * RAD2DEG, pitch * RAD2DEG, yaw * RAD2DEG);
+    } catch (tf2::TransformException& ex) {
+        if (!first_error) {
+            NODELET_DEBUG_THROTTLE(1.0, "Transform error: %s", ex.what());
+            NODELET_WARN_THROTTLE(1.0, "The tf from '%s' to '%s' is not available.", mDepthOptFrameId.c_str(),
+                mDepthFrameId.c_str());
+            NODELET_WARN_THROTTLE(1.0,
+                "Note: one of the possible cause of the problem is the absense of an instance "
+                "of the `robot_state_publisher` node publishing the correct static TF transformations "
+                "or a modified URDF not correctly reproducing the ZED "
+                "TF chain '%s' -> '%s' -> '%s'  -> %s",
+                mBaseFrameId.c_str(), mCameraFrameId.c_str(), mDepthFrameId.c_str(), mDepthOptFrameId.c_str());
+            first_error = false;
+        }
+
+        mDepthOpt2DepthTransf.setIdentity();
+        return false;
+    }
+
+    // <---- Static transforms
+    mCamera2BaseTransfValid = true;
+    return true;
+}
+
 bool ZEDWrapperNodelet::set_pose(float xt, float yt, float zt, float rr, float pr, float yr)
 {
     initTransforms();
@@ -1217,6 +1270,10 @@ bool ZEDWrapperNodelet::set_pose(float xt, float yt, float zt, float rr, float p
 
     if (!mCamera2BaseTransfValid) {
         getCamera2BaseTransform();
+    }
+
+    if (!mDepthOpt2DepthTransfValid) {
+        getDepthOpt2DepthTransform();
     }
 
     // Apply Base to sensor transform
@@ -1781,6 +1838,10 @@ void ZEDWrapperNodelet::publishOdomFrame(tf2::Transform odomTransf, ros::Time t)
         getCamera2BaseTransform();
     }
 
+    if (!mDepthOpt2DepthTransfValid) {
+        getDepthOpt2DepthTransform();
+    }
+
     geometry_msgs::TransformStamped transformStamped;
     transformStamped.header.stamp = t;
     transformStamped.header.frame_id = mOdometryFrameId;
@@ -1814,6 +1875,10 @@ void ZEDWrapperNodelet::publishPoseFrame(tf2::Transform baseTransform, ros::Time
 
     if (!mCamera2BaseTransfValid) {
         getCamera2BaseTransform();
+    }
+
+    if (!mDepthOpt2DepthTransfValid) {
+        getDepthOpt2DepthTransform();
     }
 
     geometry_msgs::TransformStamped transformStamped;
@@ -1996,8 +2061,12 @@ void ZEDWrapperNodelet::publishPointCloud()
     // We can do a direct memcpy since data organization is the same
     memcpy(ptCloudPtr, (float*)cpu_cloud, 4 * ptsCount * sizeof(float));
 
+    sensor_msgs::PointCloud2 cloud_optical_frame;
+    tf2::doTransform(*pointcloudMsg, cloud_optical_frame, mDepthOpt2DepthTransfStampedMsg);
+    
     // Pointcloud publishing
     mPubCloud.publish(pointcloudMsg);
+    mPubCloudOpt.publish(cloud_optical_frame);
 }
 
 void ZEDWrapperNodelet::callback_pubFusedPointCloud(const ros::TimerEvent& e)
@@ -3538,6 +3607,10 @@ void ZEDWrapperNodelet::device_poll_thread_func()
 
                 if (!mCamera2BaseTransfValid) {
                     getCamera2BaseTransform();
+                }
+
+                if (!mDepthOpt2DepthTransfValid) {
+                    getDepthOpt2DepthTransform();
                 }
 
                 if (!mInitOdomWithPose) {
