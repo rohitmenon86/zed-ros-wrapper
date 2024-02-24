@@ -142,7 +142,7 @@ void ZEDWrapperNodelet::onInit()
     depth_topic_root += "/depth_registered";
 
     std::string pointcloud_topic = "point_cloud/cloud_registered";
-    std::string pointcloud_optical_topic = "optical_cloud/cloud_registered";
+    std::string pointcloud_optical_topic = "depth/points";
 
     std::string pointcloud_fused_topic = "mapping/fused_cloud";
 
@@ -1221,7 +1221,7 @@ bool ZEDWrapperNodelet::getDepthOpt2DepthTransform()
     // Sensor to Base link
     try {
         // Save the transformation
-        geometry_msgs::TransformStamped mDepthOpt2DepthTransfStampedMsg = mTfBuffer->lookupTransform(mDepthOptFrameId, mDepthFrameId, ros::Time(0), ros::Duration(0.1));
+        mDepthOpt2DepthTransfStampedMsg = mTfBuffer->lookupTransform(mDepthOptFrameId, mDepthFrameId, ros::Time(0), ros::Duration(0.1));
 
         // Get the TF2 transformation
         tf2::fromMsg(mDepthOpt2DepthTransfStampedMsg.transform, mDepthOpt2DepthTransf);
@@ -2063,10 +2063,11 @@ void ZEDWrapperNodelet::publishPointCloud()
 
     sensor_msgs::PointCloud2 cloud_optical_frame;
     tf2::doTransform(*pointcloudMsg, cloud_optical_frame, mDepthOpt2DepthTransfStampedMsg);
-    
+    cloud_optical_frame.header = pointcloudMsg->header;
+    cloud_optical_frame.header.frame_id = mDepthOptFrameId;
     // Pointcloud publishing
-    mPubCloud.publish(pointcloudMsg);
     mPubCloudOpt.publish(cloud_optical_frame);
+    mPubCloud.publish(pointcloudMsg);
 }
 
 void ZEDWrapperNodelet::callback_pubFusedPointCloud(const ros::TimerEvent& e)
