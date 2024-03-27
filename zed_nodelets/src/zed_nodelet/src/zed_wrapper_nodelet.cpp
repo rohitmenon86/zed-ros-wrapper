@@ -1222,17 +1222,17 @@ bool ZEDWrapperNodelet::getDepthOpt2DepthTransform()
     try {
         // Save the transformation
         mDepthOpt2DepthTransfStampedMsg = mTfBuffer->lookupTransform(mDepthOptFrameId, mDepthFrameId, ros::Time(0), ros::Duration(0.1));
-
+        //NODELET_INFO_STREAM("matrix: "<<mDepthOpt2DepthTransfStampedMsg)    ;
         // Get the TF2 transformation
         tf2::fromMsg(mDepthOpt2DepthTransfStampedMsg.transform, mDepthOpt2DepthTransf);
 
         double roll, pitch, yaw;
         tf2::Matrix3x3(mDepthOpt2DepthTransf.getRotation()).getRPY(roll, pitch, yaw);
 
-        NODELET_INFO("Static transform Camera Center to Base [%s -> %s]", mDepthOptFrameId.c_str(), mDepthFrameId.c_str());
-        NODELET_INFO(" * Translation: {%.3f,%.3f,%.3f}", mCamera2BaseTransf.getOrigin().x(),
-            mDepthOpt2DepthTransf.getOrigin().y(), mDepthOpt2DepthTransf.getOrigin().z());
-        NODELET_INFO(" * Rotation: {%.3f,%.3f,%.3f}", roll * RAD2DEG, pitch * RAD2DEG, yaw * RAD2DEG);
+        //NODELET_INFO("Static transform [%s -> %s]", mDepthOptFrameId.c_str(), mDepthFrameId.c_str());
+        //NODELET_INFO(" * mDepthOptFrameId: Translation: {%.3f,%.3f,%.3f}", mCamera2BaseTransf.getOrigin().x(),
+        //    mDepthOpt2DepthTransf.getOrigin().y(), mDepthOpt2DepthTransf.getOrigin().z());
+        //NODELET_INFO(" * mDepthOptFrameId: Rotation: {%.3f,%.3f,%.3f}", roll * RAD2DEG, pitch * RAD2DEG, yaw * RAD2DEG);
     } catch (tf2::TransformException& ex) {
         if (!first_error) {
             NODELET_DEBUG_THROTTLE(1.0, "Transform error: %s", ex.what());
@@ -2012,6 +2012,7 @@ void ZEDWrapperNodelet::pointcloud_thread_func()
         // <---- Check publishing frequency
 
         last_time = std::chrono::steady_clock::now();
+        NODELET_DEBUG("Before publish");
         publishPointCloud();
 
         mPcDataReady = false;
@@ -2022,6 +2023,7 @@ void ZEDWrapperNodelet::pointcloud_thread_func()
 
 void ZEDWrapperNodelet::publishPointCloud()
 {
+//    NODELET_INFO("publishPointCloud");
     sensor_msgs::PointCloud2Ptr pointcloudMsg = boost::make_shared<sensor_msgs::PointCloud2>();
 
     // Publish freq calculation
@@ -2062,12 +2064,16 @@ void ZEDWrapperNodelet::publishPointCloud()
     memcpy(ptCloudPtr, (float*)cpu_cloud, 4 * ptsCount * sizeof(float));
 
     sensor_msgs::PointCloud2 cloud_optical_frame;
+    cloud_optical_frame.header = pointcloudMsg->header;
     tf2::doTransform(*pointcloudMsg, cloud_optical_frame, mDepthOpt2DepthTransfStampedMsg);
     cloud_optical_frame.header = pointcloudMsg->header;
     cloud_optical_frame.header.frame_id = mDepthOptFrameId;
     // Pointcloud publishing
+//    NODELET_INFO_STREAM("optical cloud header: "<<cloud_optical_frame.header);
     mPubCloudOpt.publish(cloud_optical_frame);
     mPubCloud.publish(pointcloudMsg);
+  //  NODELET_INFO_STREAM("published");
+    
 }
 
 void ZEDWrapperNodelet::callback_pubFusedPointCloud(const ros::TimerEvent& e)
